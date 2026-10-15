@@ -2,74 +2,95 @@ from io import BytesIO
 from pathlib import Path
 import streamlit as st
 from docx import Document
-from docx.shared import RGBColor
 
-st.set_page_config(page_title="Pengisian SPPD", page_icon="📄", layout="centered")
+st.set_page_config(page_title="Pengisian SPPD KONI", page_icon="📄", layout="wide")
 TEMPLATE = Path(__file__).parent / "template_sppd.docx"
 
-st.title("Pengisian SPPD")
-st.caption("Hanya tulisan berwarna merah pada template yang dapat diisi. Label biru/pertanyaan dan teks hitam tetap mengikuti dokumen asli.")
-st.info("Template Word asli digunakan sebagai dasar. Aplikasi hanya mengganti teks jawaban merah yang telah ditentukan; teks hitam, label pertanyaan, tanda baca, tabel, dan garis tidak dibuat ulang.")
+st.title("Pengisian SPPD — KONI Kabupaten Tangerang")
+st.write("Isi hanya jawaban yang ditandai warna merah pada dokumen Word. Pertanyaan/label biru dan teks baku hitam tetap mengikuti template asli.")
 
-with st.form("sppd"):
+def is_red(run):
+    try:
+        rgb = run.font.color.rgb
+        return rgb is not None and str(rgb).upper() in {"EE0000", "FF0000", "C00000", "E60000"}
+    except Exception:
+        return False
+
+def replace_red_paragraph(paragraph, value):
+    """Replace only red-colored runs in a paragraph; preserve all non-red text and paragraph formatting."""
+    red_runs = [run for run in paragraph.runs if is_red(run)]
+    if not red_runs:
+        return False
+    red_runs[0].text = value or ""
+    for run in red_runs[1:]:
+        run.text = ""
+    return True
+
+def replace_red_cell_paragraph(doc, row, col, paragraph_index, value):
+    table = doc.tables[0]
+    cell = table.rows[row].cells[col]
+    if paragraph_index >= len(cell.paragraphs):
+        return False
+    return replace_red_paragraph(cell.paragraphs[paragraph_index], value)
+
+if not TEMPLATE.exists():
+    st.error("File template_sppd.docx tidak ditemukan. Pastikan file ini berada di folder yang sama dengan app.py.")
+    st.stop()
+
+with st.form("sppd_form"):
     st.subheader("I. Data perjalanan")
-    asal = st.text_input("Berangkat dari", "Tangerang")
-    keperluan = st.text_input("Ke / keperluan", "Try Out Catur")
-    tiba_kembali = st.text_input("Tiba di", "Tangerang")
-    tanggal_kembali = st.text_input("Tanggal tiba", "18 Oktober 2026")
+    col1, col2 = st.columns(2)
+    with col1:
+        asal = st.text_input("Berangkat dari", "Tangerang")
+        keperluan = st.text_input("Ke / keperluan", "Try Out Catur")
+        tanggal_berangkat = st.text_input("Tanggal keberangkatan", "17 Oktober 2026")
+    with col2:
+        tempat_tiba = st.text_input("Tiba di", "Tangerang")
+        tanggal_tiba = st.text_input("Tanggal tiba", "18 Oktober 2026")
 
     st.subheader("II. Lokasi perjalanan")
-    lokasi_kiri = st.text_input("Lokasi tiba — kolom kiri", "Piset Square. Jl. Pelajar Pejuang No. 119 Bandung")
-    tanggal_kiri = st.text_input("Tanggal — kolom kiri", "17 Oktober 2026")
-    lokasi_kanan = st.text_input("Lokasi tiba — kolom kanan", "Piset Square. Jl. Pelajar Pejuang No. 119 Bandung")
-    tanggal_kanan = st.text_input("Tanggal — kolom kanan", "18 Oktober 2026")
-    submit = st.form_submit_button("Buat dokumen Word", type="primary")
+    col3, col4 = st.columns(2)
+    with col3:
+        lokasi_kiri = st.text_input("Lokasi tiba — kolom kiri", "Piset Square. Jl. Pelajar Pejuang No. 119 Bandung")
+        tanggal_lokasi_kiri = st.text_input("Tanggal — kolom kiri", "17 Oktober 2026")
+    with col4:
+        lokasi_kanan = st.text_input("Lokasi tiba — kolom kanan", "Piset Square. Jl. Pelajar Pejuang No. 119 Bandung")
+        tanggal_lokasi_kanan = st.text_input("Tanggal — kolom kanan", "18 Oktober 2026")
 
-# Pemetaan hanya pada paragraf yang memang berisi jawaban berwarna merah.
-# Setiap entri: (baris tabel, kolom tabel, indeks paragraf dalam sel, nilai formulir)
-RED_FIELDS = [
-    (0, 3, 0, "asal"),
-    (0, 3, 1, "keperluan"),
-    (0, 5, 0, "tiba_kembali"),
-    (0, 5, 1, "tanggal_kembali"),
-    (1, 3, 0, "lokasi_kiri"),
-    (1, 3, 2, "tanggal_kiri"),
-    (1, 5, 0, "lokasi_kanan"),
-    (1, 5, 1, "tanggal_kanan"),
-]
+    submitted = st.form_submit_button("Buat dokumen Word", type="primary")
 
-if submit:
-    if not TEMPLATE.exists():
-        st.error("File template_sppd.docx tidak ditemukan. Pastikan file ini ada di repository yang sama dengan app.py.")
-        st.stop()
+if submitted:
     doc = Document(str(TEMPLATE))
-    values = {
-        "asal": asal, "keperluan": keperluan,
-        "tiba_kembali": tiba_kembali, "tanggal_kembali": tanggal_kembali,
-        "lokasi_kiri": lokasi_kiri, "tanggal_kiri": tanggal_kiri,
-        "lokasi_kanan": lokasi_kanan, "tanggal_kanan": tanggal_kanan,
-    }
-    table = doc.tables[0]
-    for row_idx, col_idx, para_idx, key in RED_FIELDS:
-        cell = table.cell(row_idx, col_idx)
-        if para_idx >= len(cell.paragraphs):
-            continue
-        para = cell.paragraphs[para_idx]
-        # Hanya mengganti run yang memang berwarna merah. Semua teks non-merah dibiarkan.
-        red_runs = []
-        for run in para.runs:
-            color = run.font.color
-            if color and color.type is not None and color.rgb is not None and str(color.rgb).upper() in {"EE0000", "FF0000", "C00000", "E60000"}:
-                red_runs.append(run)
-        if red_runs:
-            red_runs[0].text = values[key]
-            for run in red_runs[1:]:
-                run.text = ""
-        # Jika run merah tidak terdeteksi karena perbedaan format, jangan sentuh paragrafnya.
+    # Pemetaan hanya ke paragraf yang pada dokumen asli mengandung teks merah.
+    # Semua label/pertanyaan dan teks hitam tidak disentuh.
+    targets = [
+        (0, 3, 0, asal),
+        (0, 3, 1, keperluan),
+        (0, 3, 2, tanggal_berangkat),  # Tanggal keberangkatan: input terpisah
+        (0, 5, 0, tempat_tiba),
+        (0, 5, 1, tanggal_tiba),
+        (1, 3, 0, lokasi_kiri),
+        (1, 3, 2, tanggal_lokasi_kiri),
+        (1, 5, 0, lokasi_kanan),
+        (1, 5, 1, tanggal_lokasi_kanan),
+    ]
+    for row, col, paragraph_index, value in targets:
+        replace_red_cell_paragraph(doc, row, col, paragraph_index, value)
+
     output = BytesIO()
     doc.save(output)
-    st.success("Dokumen Word selesai dibuat. Teks selain jawaban merah dipertahankan dari template.")
-    st.download_button("Unduh SPPD (.docx)", output.getvalue(), file_name="SPPD_KONI.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    output.seek(0)
+    st.success("Dokumen selesai dibuat. Unduh dan periksa hasilnya di Microsoft Word sebelum dicetak.")
+    st.download_button(
+        "Unduh SPPD (.docx)",
+        data=output.getvalue(),
+        file_name="SPPD_KONI.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
 
-with st.expander("Catatan"):
-    st.write("Versi ini membatasi formulir pada delapan jawaban merah yang terdeteksi di template. Jika ada tulisan merah lain yang ingin dijadikan input, pemetaan dapat ditambahkan tanpa mengubah bagian hitam/biru.")
+with st.expander("Cara menjalankan aplikasi"):
+    st.markdown("""
+1. Unggah `app.py`, `requirements.txt`, dan `template_sppd.docx` ke repository GitHub yang sama.
+2. Di Streamlit Community Cloud, pilih repository tersebut dan set **Main file path** ke `app.py`.
+3. Aplikasi akan memakai `template_sppd.docx` sebagai format asli.
+""")
